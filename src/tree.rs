@@ -1,16 +1,6 @@
-use crate::storage::Node::Leaf;
-use alloc::{collections::BTreeMap, vec::Vec};
-use alloc::{format, vec};
-use anyhow::{bail, ensure, format_err, Context, Result};
-use core::marker::PhantomData;
-use core::{cmp::Ordering, convert::TryInto};
-#[cfg(not(feature = "std"))]
-use hashbrown::HashMap;
-#[cfg(feature = "std")]
-use std::collections::HashMap;
-
 use crate::proof::definition::UpdateMerkleProof;
 use crate::proof::{SparseMerkleLeafNode, SparseMerkleNode};
+use crate::storage::Node::Leaf;
 use crate::{
     node_type::{Child, Children, InternalNode, LeafNode, Node, NodeKey, NodeType},
     storage::{TreeReader, TreeUpdateBatch},
@@ -25,6 +15,16 @@ use crate::{
     },
     Bytes32Ext, KeyHash, MissingRootError, OwnedValue, RootHash, SimpleHasher, ValueHash,
 };
+use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{format, vec};
+use anyhow::{bail, ensure, format_err, Context, Result};
+use core::marker::PhantomData;
+use core::{cmp::Ordering, convert::TryInto};
+#[cfg(not(feature = "std"))]
+use hashbrown::HashMap;
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+use std::ops::{Add, AddAssign};
 
 /// A [`JellyfishMerkleTree`] instantiated using the `sha2::Sha256` hasher.
 /// This is a sensible default choice for most applications.
@@ -35,6 +35,7 @@ pub type Sha256Jmt<'a, R> = JellyfishMerkleTree<'a, R, sha2::Sha256>;
 /// and a [`SimpleHasher`] `H`. See [`crate`] for description.
 pub struct JellyfishMerkleTree<'a, R, H: SimpleHasher> {
     reader: &'a R,
+    version_counter: usize,
     _phantom_hasher: PhantomData<H>,
 }
 
@@ -50,6 +51,7 @@ where
     pub fn new(reader: &'a R) -> Self {
         Self {
             reader,
+            version_counter: 0,
             _phantom_hasher: Default::default(),
         }
     }
@@ -70,9 +72,13 @@ where
         }
     }
 
+    pub fn get_versions_counter(&self) -> usize {
+        self.version_counter
+    }
+
     /// The batch version of `put_value_sets`.
     pub fn batch_put_value_sets(
-        &self,
+        &mut self,
         value_sets: Vec<Vec<(KeyHash, OwnedValue)>>,
         node_hashes: Option<Vec<&HashMap<NibblePath, [u8; 32]>>>,
         first_version: Version,
@@ -110,6 +116,7 @@ where
                 &hash_set,
                 &mut tree_cache,
             )?;
+            self.version_counter.add_assign(1);
             tree_cache.set_root_node_key(new_root_node_key);
 
             // Freezes the current cache to make all contents in the current cache immutable.
